@@ -1,5 +1,9 @@
-﻿using LinkHub.Api.Dtos;
+﻿using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using LinkHub.Api.Dtos;
 using LinkHub.Api.Infrastructure.Data;
+using LinkHub.Api.Services;
+using LinkHub.Api.Services.Interfaces;
 using LinkHub.Core.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,10 +15,12 @@ namespace LinkHub.Api.Controllers;
 public class UsersController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
+    private readonly ITokenService _tokenService;
 
-    public UsersController(ApplicationDbContext context)
+    public UsersController(ApplicationDbContext context, ITokenService tokenService)
     {
         _context = context;
+        _tokenService = tokenService;
     }
 
     /// <summary>
@@ -51,5 +57,55 @@ public class UsersController : ControllerBase
         // É uma boa prática retornar o objeto criado (sem dados sensíveis).
         // Aqui, retornamos um DTO simples, mas poderíamos criar um UserDto específico.
         return Ok(new { user.Id, user.Name, user.Email });
+    }
+
+    /// <summary>
+    /// Endpoint para autenticar um usuário e retornar um token JWT.
+    /// </summary>
+    [HttpPost("login")] // Rota: POST api/users/login
+    public async Task<IActionResult> Login(LoginDto loginDto)
+    {
+        // 1. Encontrar o usuário pelo e-mail
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == loginDto.Email);
+
+        // 2. Verificar se o usuário existe E se a senha está correta.
+        // O BCrypt.Verify compara a senha enviada (texto plano) com o hash salvo no banco.
+        if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
+        {
+            // Usamos uma mensagem genérica por segurança, para não informar se foi o e-mail ou a senha que errou.
+            return Unauthorized("Credenciais inválidas.");
+        }
+
+        // 3. Se as credenciais estiverem corretas, gerar o token JWT
+        var token = _tokenService.GenerateToken(user);
+
+        // 4. Retornar o token para o cliente
+        return Ok(new { Token = token });
+    }
+
+    /// <summary>
+    /// Endpoint protegido que retorna os dados do usuário logado.
+    /// </summary>
+    [HttpGet("me")] // Rota: GET api/users/me
+    [Authorize]
+    public async Task<IActionResult> GetMe()
+    {
+        var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdString))
+        {
+            return Unauthorized();
+        }
+
+        var user = await _context.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == int.Parse(userIdString));
+
+        if (user is null)
+        {
+            return NotFound("Usuário não encontrado.");
+        }
+
+        return Ok(new { user.Id, user.Name, user.Email, user.CreatedAt, user.LastUpdatedAt });
     }
 }

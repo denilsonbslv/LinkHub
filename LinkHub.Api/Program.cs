@@ -1,6 +1,11 @@
 // Importa os namespaces necessários que usaremos.
 using LinkHub.Api.Infrastructure.Data;
+using LinkHub.Api.Services;
+using LinkHub.Api.Services.Interfaces;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using Microsoft.EntityFrameworkCore.SqlServer;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
@@ -26,10 +31,65 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 // Habilita o uso de Controllers. Linha essencial para nossa arquitetura.
 builder.Services.AddControllers();
+builder.Services.AddScoped<ITokenService, TokenService>();
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = builder.Configuration["Jwt:Issuer"],
+        ValidAudience = builder.Configuration["Jwt:Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
+    };
+});
+
+builder.Services.AddAuthorization();
 
 // Adiciona os serviços do Swagger para documentação da API.
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+builder.Services.AddSwaggerGen(options =>
+{
+    // Adiciona uma seção "Authorize" na UI do Swagger
+    options.SwaggerDoc("v1", new OpenApiInfo { Title = "LinkHub API", Version = "v1" });
+
+    // 1. Define o esquema de segurança que a API usa (Bearer Authentication)
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        In = ParameterLocation.Header,
+        Description = "Por favor, insira 'Bearer' seguido de um espaço e o token JWT",
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http, // Usamos Http pois o Bearer é um esquema HTTP
+        Scheme = "Bearer",
+        BearerFormat = "JWT"
+    });
+
+    // 2. Aplica o requisito de segurança globalmente a todos os endpoints
+    // Isso fará com que o Swagger envie o token em todas as requisições após o login.
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 
 // --- 2. CONSTRUÇÃO DA APLICAÇÃO ---
@@ -47,7 +107,7 @@ if (app.Environment.IsDevelopment())
 // Redireciona requisições HTTP para HTTPS.
 app.UseHttpsRedirection();
 
-// Habilita a autorização (usaremos mais tarde).
+app.UseAuthentication();
 app.UseAuthorization();
 
 // Mapeia as rotas definidas nos nossos arquivos de Controller.
