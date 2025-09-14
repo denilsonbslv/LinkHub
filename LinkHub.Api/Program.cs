@@ -15,7 +15,14 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 
 // Registra o ApplicationDbContext e configura o Entity Framework para usar o SQL Server.
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlServer(connectionString));
+    options.UseSqlServer(connectionString, sqlServerOptionsAction: sqlOptions =>
+    {
+        // Habilita a lógica de retentativa (retry)
+        sqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5, // Tenta até 5 vezes
+            maxRetryDelay: TimeSpan.FromSeconds(30), // Espera no máximo 30s entre as tentativas
+            errorNumbersToAdd: null); // Usa os erros transientes padrão do SQL Azure
+    }));
 
 // Habilita o uso de Controllers. Linha essencial para nossa arquitetura.
 builder.Services.AddControllers();
