@@ -27,14 +27,17 @@ public class UsersController : ControllerBase
     /// Endpoint para registrar um novo usuário no sistema.
     /// </summary>
     [HttpPost("register")] // Rota: POST api/users/register
-    public async Task<IActionResult> Register(RegisterUserDto registerUserDto)
+    public async Task<IActionResult> Register([FromBody] RegisterUserDto registerUserDto)
     {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
         // 1. Verificar se já existe um usuário com o mesmo e-mail
         var userExists = await _context.Users.AnyAsync(u => u.Email == registerUserDto.Email);
         if (userExists)
         {
             // Retorna um erro 400 (Bad Request) informando que o e-mail já está em uso.
-            return BadRequest("Este e-mail já está em uso.");
+            return BadRequest(new { error = "Este e-mail já está em uso." });
         }
 
         // 2. Criptografar a senha (gerar o hash)
@@ -46,7 +49,9 @@ public class UsersController : ControllerBase
         {
             Name = registerUserDto.Name,
             Email = registerUserDto.Email,
-            PasswordHash = passwordHash
+            PasswordHash = passwordHash,
+            CreatedAt = DateTime.UtcNow,
+            LastUpdatedAt = DateTime.UtcNow
         };
 
         // 4. Adicionar o usuário ao DbContext e salvar no banco de dados
@@ -56,15 +61,25 @@ public class UsersController : ControllerBase
         // 5. Retornar uma resposta de sucesso
         // É uma boa prática retornar o objeto criado (sem dados sensíveis).
         // Aqui, retornamos um DTO simples, mas poderíamos criar um UserDto específico.
-        return Ok(new { user.Id, user.Name, user.Email });
+        return Ok(new UserDto
+        {
+            Id = user.Id,
+            Name = user.Name,
+            Email = user.Email,
+            CreatedAt = user.CreatedAt,
+            LastUpdatedAt = user.LastUpdatedAt
+        });
     }
 
     /// <summary>
     /// Endpoint para autenticar um usuário e retornar um token JWT.
     /// </summary>
     [HttpPost("login")] // Rota: POST api/users/login
-    public async Task<IActionResult> Login(LoginDto loginDto)
+    public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
     {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
         // 1. Encontrar o usuário pelo e-mail
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == loginDto.Email);
 
@@ -73,7 +88,7 @@ public class UsersController : ControllerBase
         if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
         {
             // Usamos uma mensagem genérica por segurança, para não informar se foi o e-mail ou a senha que errou.
-            return Unauthorized("Credenciais inválidas.");
+            return Unauthorized(new { error = "Credenciais inválidas." });
         }
 
         // 3. Se as credenciais estiverem corretas, gerar o token JWT
